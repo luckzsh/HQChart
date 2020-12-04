@@ -114,6 +114,8 @@ var Character =
             (cp >= 0x41 && cp <= 0x5A) ||
             (cp >= 0x61 && cp <= 0x7A) ||
             (cp === 0x5C) ||
+            //【】
+            (cp===0x3010 || cp===0x3011) ||
             ((cp >= 0x80) && Regex.NonAsciiIdentifierStart.test(Character.FromCodePoint(cp)));
     },
 
@@ -124,6 +126,8 @@ var Character =
             (cp >= 0x61 && cp <= 0x7A) ||
             (cp >= 0x30 && cp <= 0x39) ||
             (cp === 0x5C) ||
+            //【】
+            (cp===0x3010 || cp===0x3011) ||
             ((cp >= 0x80) && Regex.NonAsciiIdentifierPart.test(Character.FromCodePoint(cp)));
     },
 
@@ -753,7 +757,7 @@ function Node()
         return jobs;
     }
 
-    this.VerifySymbolVariable=function(varName)
+    this.VerifySymbolVariable = function (varName, token)
     {
         let setIndexName = new Set(['INDEXA', 'INDEXC', 'INDEXH', 'INDEXL', "INDEXO", "INDEXV", 'INDEXDEC', 'INDEXADV']);
         if (setIndexName.has(varName)) 
@@ -883,9 +887,9 @@ function Node()
         return { Type:Syntax.Literal, Value:value, Raw:raw };
     }
 
-    this.Identifier=function(name)
+    this.Identifier = function (name, token)
     {
-        this.VerifySymbolVariable(name);
+        this.VerifySymbolVariable(name, token);
 
         return { Type:Syntax.Identifier, Name:name};
     }
@@ -1393,7 +1397,7 @@ function JSParser(code)
             this.ThrowUnexpectedToken(token);
         }
 
-        return this.Finalize(node, this.Node.Identifier(token.Value));
+        return this.Finalize(node, this.Node.Identifier(token.Value, token));
     }
 
     // https://tc39.github.io/ecma262/#sec-left-hand-side-expressions
@@ -1435,7 +1439,8 @@ function JSParser(code)
         switch(this.LookAhead.Type)
         {
             case 3:/* Identifier */
-                expr=this.Finalize(node, this.Node.Identifier(this.NextToken().Value));
+                token = this.NextToken();
+                expr = this.Finalize(node, this.Node.Identifier(token.Value, token));
                 break;
             case 6:/* NumericLiteral */
             case 8:/* StringLiteral */
@@ -2233,9 +2238,12 @@ function JSAlgorithm(errorHandler, symbolData)
 
     this.IF=function(data,trueData,falseData)
     {
-        let isNumber=typeof(data)=='number';
-        let isNumber2=typeof(trueData)=='number';
-        let isNumber3=typeof(falseData)=='number';
+        let isNumber=this.IsNumber(data);
+        let isNumber2=this.IsNumber(trueData);
+        let isNumber3=this.IsNumber(falseData);
+
+        var isArray2=Array.isArray(trueData);
+        var isArray3=Array.isArray(falseData);
         
         //单数值
         if (isNumber) 
@@ -2252,12 +2260,14 @@ function JSAlgorithm(errorHandler, symbolData)
             if (data[i])
             {
                 if (isNumber2) result[i]=trueData;
-                else result[i]=trueData[i];
+                else if (isArray2) result[i]=trueData[i];
+                else result[i]=null;
             }
             else
             {
                 if (isNumber3) result[i]=falseData;
-                else result[i]=falseData[i];
+                else if (isArray3) result[i]=falseData[i];
+                else result[i]=null;
             }
         }
 
@@ -2302,7 +2312,107 @@ function JSAlgorithm(errorHandler, symbolData)
         }
 
         return result;
-        
+    }
+
+    //引用若干周期前的数据(未作平滑处理).
+    //用法: REFV(X,A),引用A周期前的X值.A可以是变量.
+    //平滑处理:当引用不到数据时进行的操作.
+    //例如: REFV(CLOSE,BARSCOUNT(C)-1)表示第二根K线的收盘价.
+    this.REFV=function(data,n)
+    {
+        let result=[];
+        if (typeof(n)=='number')
+        {
+            if (data.length<=0) return result;
+            if (n>=data.length) return result;
+
+            result=data.slice(0,data.length-n);
+
+            for(let i=0;i<n;++i)    //不作平滑处理
+                result.unshift(null);
+        }
+        else    //n 为数组的情况
+        {
+            for(let i=0;i<data.length;++i)
+            {
+                result[i]=null;
+                if (i>=n.length) continue;
+                var value=n[i];
+                if (value>=0 && value<=i) result[i]=data[i-value];
+            }
+        }
+
+        return result; 
+    }
+
+    //属于未来函数,引用若干周期后的数据(平滑处理).
+    //用法: REFX(X,A),引用A周期后的X值.A可以是变量.
+    //平滑处理:当引用不到数据时进行的操作.此函数中,平滑时使用上一个周期的引用值.
+    //例如: TT:=IF(C>O,1,2);
+    //      REFX(CLOSE,TT);表示阳线引用下一周期的收盘价,阴线引用日后第二周期的收盘价.
+    this.REFX=function(data,n)
+    {
+        let result=[];
+        if (typeof(n)=='number')
+        {
+            if (data.length<=0) return result;
+            if (n>=data.length) return result;
+
+            result=data.slice(n,data.length);
+
+            //平滑处理
+            var lastData=data[data.length-1];
+            for(let i=0;i<n;++i)
+                result.push(lastData);
+        }
+        else    //n 为数组的情况
+        {
+            var dataCount=data.length;
+            for(let i=0;i<data.length;++i)
+            {
+                result[i]=null;
+                if (i>=n.length) continue;
+                var value=n[i];
+                if (value>=0 && value+i<dataCount) result[i]=data[i+value];
+                else if (i) result[i]=result[i-1];
+                else result[i]=data[i];
+            }
+        }
+
+        return result; 
+    }
+
+    //属于未来函数,引用若干周期后的数据(未作平滑处理).
+    //用法:REFXV(X,A),引用A周期后的X值.A可以是变量.
+    //平滑处理:当引用不到数据时进行的操作.
+    //例如: REFXV(CLOSE,1)表示下一周期的收盘价,在日线上就是明天收盘价
+    this.REFXV=function(data,n)
+    {
+        let result=[];
+        if (typeof(n)=='number')
+        {
+            if (data.length<=0) return result;
+            if (n>=data.length) return result;
+
+            result=data.slice(n,data.length);
+
+            //平滑处理
+            for(let i=0;i<n;++i)
+                result.push(null);
+        }
+        else    //n 为数组的情况
+        {
+            var dataCount=data.length;
+            for(let i=0;i<data.length;++i)
+            {
+                result[i]=null;
+                if (i>=n.length) continue;
+                var value=n[i];
+                if (value>=0 && value+i<dataCount) result[i]=data[i+value];
+            }
+        }
+
+        return result; 
     }
 
     this.MAX=function(data,data2)
@@ -2413,7 +2523,7 @@ function JSAlgorithm(errorHandler, symbolData)
 
     this.MA=function(data,dayCount)
     {
-        if (dayCount <= 0) dayCount = 1;
+        if (dayCount <= 0) return [];
 
         let result = [];
         if (!data || !data.length) return result;
@@ -2478,6 +2588,45 @@ function JSAlgorithm(errorHandler, symbolData)
         for(var i=offset+1;i<data.length;++i,++p1Index,++p2Index)
         {
             result[p2Index]=((2*data[p2Index]+(dayCount-1)*result[p1Index]))/(dayCount+1);
+        }
+
+        return result;
+    }
+
+    this.XMA = function (data, n) 
+    {
+        var result = [];
+        var offset = 0;
+        for (; offset < data.length; ++offset) 
+        {
+            if (this.IsNumber(data[offset])) break;
+        }
+
+        var p = parseInt((n - 2) / 2);
+        var sum = 0;
+        var count = 0, start = 0, end = 0;
+
+        for (var i = offset, j=0; i < data.length; ++i) 
+        {
+            start = i - p - 1;
+            end = i + (n - p) - 1;
+            for (j = start; j < end; ++j) 
+            {
+                if (j >= 0 && j < data.length) 
+                {
+                    if (this.IsNumber(data[j])) 
+                    {
+                        sum += data[j];
+                        ++count;
+                    }
+                }
+            }
+
+            if (count != 0) result[i] = (sum / count);
+            else result[i] = null;
+
+            sum = 0;
+            count = 0;
         }
 
         return result;
@@ -2751,20 +2900,69 @@ function JSAlgorithm(errorHandler, symbolData)
 
     this.COUNT=function(data,n)
     {
-        let result=[];
-
-        for(let i=0; i<data.length; ++i)
+        if (Array.isArray(n))
         {
-            let count=0;
-            for (let j = 0; j < n && i - j >= 0; ++j) 
+            var start=null;
+            var dataCount=data.length;
+            for(var i=0;i<dataCount;++i) 
             {
-                if (data[i - j])++count;
+                if (this.IsNumber(data[i])) 
+                {
+                    start=i;
+                    break;
+                }
+            }
+            if (start==null) return [];
+
+            var result=[];
+            var count=0;
+            for(var i=0;i<n.length;++i)
+            {
+                var period=n[i];
+                if (!this.IsNumber(period)) continue;
+                
+                if (period<1) period=i+1;
+                count=0;
+                for(var j=i, k=0 ;j>=0 && k<period ;--j,++k)    //当前往前period天 统计
+                {
+                    if (data[j]) ++count;
+                }
+
+                result[i]=count;
             }
 
-            result[i]=count;
+            return result;
         }
-
-        return result;
+        else
+        {
+            var period=n;
+            var dataCount=data.length;
+            var period=period<1?dataCount:period;
+    
+            var i=0,j=0;
+            for(;i<dataCount;++i)   // 取第1个有效数据
+            {
+                if (this.IsNumber(data[i])) break;
+            }
+    
+            var result=[];
+            var days=0;
+            for(;i<dataCount && j<period; ++i,++j)
+            {
+                days=data[i]?days+1:days;
+                result[i]=days;
+            }
+            
+            for(;i<dataCount;++i)
+            {
+                if (data[i-period] && days) days--;
+    
+                days=data[i] ? days+1 : days;
+                result[i]=days;
+            }
+    
+            return result;
+        }
     }
 
     /*
@@ -2831,7 +3029,7 @@ function JSAlgorithm(errorHandler, symbolData)
                 }
                 else 
                 {
-                    for (j = nMax = (i - n + 2); j <= i; ++j) 
+                    for (j = nMax = (i - n + 1); j <= i; ++j) 
                     {
                         nMax = data[j] < data[nMax] ? nMax : j;
                     }
@@ -3678,98 +3876,134 @@ function JSAlgorithm(errorHandler, symbolData)
     用法: ZIG(K,N),当价格变化量超过N%时转向,K表示0:开盘价,1:最高价,2:最低价,3:收盘价,其余:数组信息
     例如: ZIG(3,5)表示收盘价的5%的ZIG转向
     */
-    this.ZIG = function (data, n) 
+    this.ZIG=function(data,n)
     {
-        var hisData = this.SymbolData.Data;
-        var result = [];
-        if (typeof (data) == 'number') 
+        var hisData=this.SymbolData.Data;
+        var result=[];
+        if (typeof(data)=='number')
         {
-            switch (data) 
+            switch(data)
             {
                 case 0:
-                    data = hisData.GetOpen();
+                    data=hisData.GetOpen();
                     break;
                 case 1:
-                    data = hisData.GetHigh();
+                    data=hisData.GetHigh();
                     break;
                 case 2:
-                    data = hisData.GetLow();
+                    data=hisData.GetLow();
                     break;
                 case 3:
-                    data = hisData.GetClose();
+                    data=hisData.GetClose();
                     break;
                 default:
                     return result;
             }
         }
 
-        var bFirstPoint = false;
-        var bSecondPont = false;
-        var firstData = {}, secondData = {}, thridData = {};
-        var lastData = {};
-        for (let i in data) 
-        {
-            result[i] = null;
-            var item = data[i];
-            if (!this.IsNumber(item)) continue;
+        return this.ZIG_Calculate(data,n);
+    }
 
-            if (bFirstPoint == false) 
+    this.ZIG_Calculate=function(data,dRate)
+    {
+        var dest=[];
+        var nDataCount=data.length;
+        var m=this.GetFirstVaildIndex(data);
+	    var i = 0, lLastPos = 0, lState = 0, j = 0;
+        var dif = 0;
+        for (i = m + 1, lLastPos = lState = m; i<nDataCount - 1 && lState == m; ++i)
+        {
+            lState = Math.abs(data[i] - data[m]) * 100 >= dRate*data[m] ? (data[i]>data[m] ? i : -i) : m;
+        }
+
+        for (; i<nDataCount - 1; ++i)
+        {
+            if (data[i] >= data[i - 1] && data[i] >= data[i + 1])
             {
-                bFirstPoint = true;
-                firstData = { ID: parseInt(i), Value: item };  //第1个点
-            }
-            else if (bFirstPoint == true && bSecondPont == false) 
-            {
-                var temp = (item - firstData.Value) / firstData.Value * 100;
-                if (temp > n) 
+                if (lState<0)
                 {
-                    secondData = { ID: parseInt(i), Value: item, Up: true };
-                    lastData = { ID: parseInt(i), Value: item };
-                    bSecondPont = true;
-                }
-                else if (temp < -n) 
-                {
-                    secondData = { ID: parseInt(i), Value: item, Up: false };
-                    lastData = { ID: parseInt(i), Value: item };
-                    bSecondPont = true;
-                }
-            }
-            else if (bFirstPoint == true && bSecondPont == true) 
-            {
-                var temp = (item - lastData.Value) / lastData.Value * 100;
-                if (secondData.Up == true)    //找下跌的点
-                {
-                    if (temp < -n) 
-                    {
-                        thridData = { ID: parseInt(i), Value: item, Up: false };
-                        this.CalculateZIGLine(firstData, secondData, thridData, data, result);
-                        lastData = { ID: parseInt(i), Value: item };
-                    }
-                    else 
-                    {
-                        if (item > lastData.Value) lastData = { ID: parseInt(i), Value: item };
-                    }
-                }
-                else {
-                    if (temp > n) 
-                    {
-                        thridData = { ID: parseInt(i), Value: item, Up: true };
-                        this.CalculateZIGLine(firstData, secondData, thridData, data, result);
-                        lastData = { ID: parseInt(i), Value: item };
-                    }
+                    if ((data[i] - data[-lState]) * 100<dRate*data[-lState]) continue;
                     else
                     {
-                        if (item < lastData.Value) lastData = { ID: parseInt(i), Value: item };
+                        dif = (data[lLastPos] - data[j = -lState]) / (-lState - lLastPos);
+                        dest[j--]=data[-lState];
+                        for (; j >= lLastPos; j--)
+                            dest[j]=data[-lState] + (-lState - j)*dif;
+                        lLastPos = -lState;
+                        lState = i;
                     }
                 }
+                else if (data[i]>data[lState])  lState = i;
+            }
+            else if (data[i] <= data[i - 1] && data[i] <= data[i + 1])
+            {
+                if (lState>0)
+                {
+                    if ((data[lState] - data[i]) * 100<dRate*data[lState]) continue;
+                    else
+                    {
+                        dif = (data[lState] - data[j = lLastPos]) / (lState - lLastPos);
+                        dest[j++]=data[lLastPos];
+                        for (; j <= lState; ++j)
+                            dest[j]=data[lLastPos] + (j - lLastPos)*dif;
+                        lLastPos = lState;
+                        lState = -i;
+                    }
+                }
+                else if (data[i]<data[-lState]) lState = -i;
             }
         }
 
-        //计算最后1组数据
-        thridData = { ID: data.length - 1, Value: data[data.length - 1], Up: !secondData.Up };
-        this.CalculateZIGLine(firstData, secondData, thridData, data, result);
+        if (Math.abs(lState) >= nDataCount - 2)
+        {
+            if (lState>0 && data[nDataCount - 1] >= data[lState]) lState = nDataCount - 1;
+            if (lState<0 && data[nDataCount - 1] <= data[-lState]) lState = 1 - nDataCount;
+        }
 
-        return result;
+        if (lState>0)
+        {
+            dif = (data[lState] - data[j = lLastPos]) / (lState - lLastPos );
+            dest[j++]=data[lLastPos];
+            for (; j <= lState; ++j)
+                dest[j]=data[lLastPos] + (j - lLastPos)*dif;
+        }
+        else
+        {
+            dif = (data[lLastPos] - data[j = -lState]) / (-lState - lLastPos);
+            dest[j--]=data[-lState];
+            for (; j >= lLastPos; j--)
+                dest[j]=(data[-lState] + (-lState - j)*dif);
+        }
+        if ((lState = Math.abs(lState))<nDataCount - 1)
+        {
+            if (data[nDataCount - 1] >= data[lState])
+            {
+                dif = (data[nDataCount - 1] - data[j = lState]) / (nDataCount - lState);
+                dest[j++]=(data[lState]);
+                for (; j<nDataCount; ++j)
+                    dest[j]=(data[lState] + (j - lState)*dif);
+            }
+            else
+            {
+                dif = (data[lState] - data[j = nDataCount - 1]) / (nDataCount - lState);
+                dest[j--]=(data[nDataCount - 1]);
+                for (; j >= lState; j--)
+                    dest[j]=(data[nDataCount - 1] + (nDataCount - j)*dif);
+            }
+        }
+
+        return dest;
+    }
+
+
+    this.GetFirstVaildIndex=function(data)
+    {
+        for (var i = 0; i <data.length; ++i)
+        {
+            if (this.IsNumber(data[i]))
+                return i;
+        }
+        return data.length;
     }
 
     this.JSDraw = null;
@@ -3837,54 +4071,89 @@ function JSAlgorithm(errorHandler, symbolData)
     例如:
     TROUGHBARS(2,5,2)表示%5最低价ZIG转向的前2个波谷到当前的周期数
     */
-    this.TROUGHBARS = function (data, n, n2) 
+    this.TROUGHBARS=function(data,n,n2)
     {
-        var zigData = this.ZIG(data, n);   //计算ZIG
-        var i = 0, result = [];
-        for (i = 0; i < zigData.length; ++i) 
-        {
-            result[i] = null;
-            if (this.IsNumber(zigData[i])) break;
-        }
+        var zigData=this.ZIG(data,n);   //计算ZIG
+        var dest=[];
 
+        var lEnd =n2;
+        if (lEnd<1) return dest;
+
+        var nDataCount = zigData.length;
         var trough = [];
-        var start = i, j = 0;
-        for (; i < zigData.length; ++i)  //第1个波谷
-        {
-            if (i + 1 < zigData.length && i - 1 >= 0 && zigData[i] < zigData[i - 1] && zigData[i] < zigData[i + 1]) //波谷
-            {
-                trough[0] = i;
-                break;
-            }
-        }
+        for(var i=0;i<lEnd;++i) trough[i]=0;
+        var lFlag = 0;
+        var i = this.GetFirstVaildIndex(zigData) + 1;
+        for (lEnd--; i<nDataCount && zigData[i]>zigData[i - 1]; ++i);
 
-        for (i += 1; i < zigData.length; ++i) 
+        for (; i<nDataCount && zigData[i]<zigData[i - 1]; ++i);
+
+        for (trough[0] = --i; i<nDataCount - 1; ++i)
         {
-            result[i] = null;
-            if (i + 1 < zigData.length && i - 1 >= 0 && zigData[i] < zigData[i - 1] && zigData[i] < zigData[i + 1]) //波谷
+            if (zigData[i]<zigData[i + 1])
             {
-                console.log('[TROUGHBARS] i', i, zigData[i]);
-                ++j;
-                trough[j] = i;
-                if (j + 1 == n2) 
+                if (lFlag)
                 {
-                    result[i] = i - start;
-                }
-                else if (j + 1 > n2) 
-                {
-                    trough.shift(); //大于计算的波谷数,去掉第1个波谷
-                    start = trough[0];
-                    --j;
-                    result[i] = i - start;
+                    if (lEnd)
+                    {
+                        var tempTrough=trough.slice(0);
+                        for(var j=0;j<lEnd;++j)
+                        {
+                            trough[j+1]=tempTrough[j];
+                        }
+                    } 
+                    trough[lFlag = 0] = i;
                 }
             }
-            else 
-            {
-                if (j + 1 === n2) result[i] = i - start;
-            }
+            else lFlag = 1;
+            if (trough[lEnd]) dest[i]=(i - trough[lEnd]);
         }
+        if (trough[lEnd]) dest[i]=(i - trough[lEnd]);
 
-        return result;
+        return dest;
+    }
+
+    this.TROUGH=function(data,n,n2)
+    {
+        var zigData=this.ZIG(data,n);   //计算ZIG
+        var dest=[];
+
+        var End=n2;
+        if(End<1) return dest;
+
+        var nDataCount = zigData.length;
+        var trough=[];
+        for(var i=0;i<End;++i) trough[i]=0;
+        var i=1,Flag=0;
+        var i = this.GetFirstVaildIndex(zigData) + 1;
+
+        for(End--; i<nDataCount && zigData[i]>zigData[i-1]; ++i);
+
+        for(; i<nDataCount && zigData[i]<zigData[i-1]; ++i);
+
+        for(trough[0]=--i;i<nDataCount-1;++i)
+        {	
+            if(zigData[i]<zigData[i+1])
+            {	
+                if(Flag) 
+                {	
+                    if(End) 
+                    {
+                        var tempTrough=trough.slice(0);
+                        for(var j=0;j<End;++j)
+                        {
+                            trough[j+1]=tempTrough[j];
+                        }
+                    }
+                    trough[Flag=0]=i;
+                }
+            }
+            else Flag=1;
+            if(trough[End]) dest[i]=zigData[trough[End]];
+        }
+        if(trough[End]) dest[i]=zigData[trough[End]];
+
+        return dest;
     }
 
     /*
@@ -3894,54 +4163,91 @@ function JSAlgorithm(errorHandler, symbolData)
     例如:
     PEAKBARS(0,5,1)表示%5开盘价ZIG转向的上一个波峰到当前的周期数
     */
-    this.PEAKBARS = function (data, n, n2) 
+    this.PEAKBARS=function(data,n,n2)
     {
-        var zigData = this.ZIG(data, n);   //计算ZIG
-        var i = 0, result = [];
-        for (i = 0; i < zigData.length; ++i) 
-        {
-            result[i] = null;
-            if (this.IsNumber(zigData[i])) break;
-        }
+       var zigData=this.ZIG(data,n);   //计算ZIG
+       var dest=[];
 
-        var trough = [];
-        var start = i, j = 0;
-        for (; i < zigData.length; ++i)  //第1个波峰
-        {
-            if (i + 1 < zigData.length && i - 1 >= 0 && zigData[i] > zigData[i - 1] && zigData[i] > zigData[i + 1]) //波峰
-            {
-                trough[0] = i;
-                break;
-            }
-        }
+       var nDataCount = zigData.length;
+       var lEnd = n2;
+       if (lEnd < 1) return dest;
 
-        for (i += 1; i < zigData.length; ++i) 
+       var peak = [];
+       for(var i=0;i<lEnd;++i) peak[i]=0;
+       var lFlag = 0;
+       
+       var i = this.GetFirstVaildIndex(zigData) + 1;
+       for (lEnd--; i<nDataCount && zigData[i]<zigData[i - 1]; ++i);
+
+       for (; i<nDataCount && zigData[i]>zigData[i - 1]; ++i);
+
+       for (peak[0] = --i; i<nDataCount - 1; ++i)
+       {
+           if (zigData[i]>zigData[i + 1])
+           {
+               if (lFlag)
+               {
+                   if (lEnd) 
+                   {
+                       var tempPeak=peak.slice(0);
+                       for(var j=0;j<lEnd;++j)
+                       {
+                           peak[j+1]=tempPeak[j];
+                       }
+                   }
+                   peak[lFlag = 0] = i;
+               }
+           }
+           else lFlag = 1;
+           if (peak[lEnd]) dest[i]=(i - peak[lEnd]);
+       }
+       if (peak[lEnd])dest[i]=(i - peak[lEnd]);
+
+       return dest;
+   }
+
+
+    this.PEAK=function(data,n,n2)
+    {
+        var zigData=this.ZIG(data,n);   //计算ZIG
+        var dest=[];
+
+        var nDataCount = zigData.length;
+        var lEnd = n2;
+        if (lEnd < 1) return dest;
+
+        var lFlag = 0;
+        var peak = [];
+        for(var i=0;i<lEnd;++i) peak[i]=0;
+        
+        var i = this.GetFirstVaildIndex(zigData) + 1;
+        for (lEnd--; i<nDataCount && zigData[i]<zigData[i - 1]; ++i);
+
+        for (; i<nDataCount && zigData[i]>zigData[i - 1]; ++i);
+
+        for (peak[0] = --i; i<nDataCount - 1; ++i)
         {
-            result[i] = null;
-            if (i + 1 < zigData.length && i - 1 >= 0 && zigData[i] > zigData[i - 1] && zigData[i] > zigData[i + 1]) //波峰
+            if (zigData[i]>zigData[i + 1])
             {
-                console.log('[TROUGHBARS] i', i, zigData[i]);
-                ++j;
-                trough[j] = i;
-                if (j + 1 == n2)
+                if (lFlag)
                 {
-                    result[i] = i - start;
-                }
-                else if (j + 1 > n2) 
-                {
-                    trough.shift(); //大于计算的波谷数,去掉第1个波谷
-                    start = trough[0];
-                    --j;
-                    result[i] = i - start;
+                    if (lEnd) 
+                    {
+                        var tempPeak=peak.slice(0);
+                        for(var j=0;j<lEnd;++j)
+                        {
+                            peak[j+1]=tempPeak[j];
+                        }
+                    }
+                    peak[lFlag = 0] = i;
                 }
             }
-            else 
-            {
-                if (j + 1 === n2) result[i] = i - start;
-            }
+            else lFlag = 1;
+            if (peak[lEnd]) dest[i]=(zigData[peak[lEnd]]);
         }
-
-        return result;
+        if (peak[lEnd]) dest[i]=(zigData[peak[lEnd]]);
+        
+        return dest;
     }
 
     /*
@@ -4517,41 +4823,74 @@ function JSAlgorithm(errorHandler, symbolData)
     {
         var result = [];
         if (!Array.isArray(data)) return result;
-        if (n < 1) n = data.length;
-
-        var nMax = null;  //最大值索引
-        for (var i = 0; i < data.length; ++i) 
+        if (Array.isArray(n))
         {
-            result[i] = null;
-            if (this.IsNumber(data[i])) {
-                nMax = i;
-                break;
-            }
-        }
-
-        var j = 0;
-        for (i = nMax + 1; i < data.length && j < n; ++i, ++j) //求第1个最大值
-        {
-            if (data[i] >= data[nMax]) nMax = i;
-            if (n == data.length) result[i] = (i - nMax);
-        }
-
-        for (; i < data.length; ++i) 
-        {
-            if (i - nMax < n) 
+            for(var i=0;i<n.length;++i)
             {
-                if (data[i] >= data[nMax]) nMax = i;
-            }
-            else 
-            {
-                nMax = i - n + 1;
-                for (j = nMax; j <= i; ++j)    //计算区间最大值
+                result[i]=null;
+                var period=n[i];
+                if (!this.IsNumber(period)) continue;
+
+                var start=i-period;
+                if (start<0) start=0;
+                var nMax=null;
+                var j=start;
+                for(; j<data.length;++j)
                 {
-                    if (data[j] >= data[nMax]) nMax = j;
+                    if (this.IsNumber(data[j]))
+                    {
+                        nMax=j;
+                        break;
+                    }
+                }
+
+                for(var k=0; j<data.length && k<period;++k, ++j)
+                {
+                    if (data[j]>=data[nMax]) nMax=j;
+                }
+
+                if (nMax!=null)
+                    result[i]=(i-nMax);
+            }
+        }
+        else
+        {
+            if (n < 1) n = data.length;
+
+            var nMax = null;  //最大值索引
+            for (var i = 0; i < data.length; ++i) 
+            {
+                result[i] = null;
+                if (this.IsNumber(data[i])) {
+                    nMax = i;
+                    break;
                 }
             }
 
-            result[i] = i - nMax;
+            var j = 0;
+            for (i = nMax + 1; i < data.length && j < n; ++i, ++j) //求第1个最大值
+            {
+                if (data[i] >= data[nMax]) nMax = i;
+                if (n == data.length) result[i] = (i - nMax);
+            }
+
+            for (; i < data.length; ++i) 
+            {
+                if (i - nMax < n) 
+                {
+                    if (data[i] >= data[nMax]) nMax = i;
+                }
+                else 
+                {
+                    nMax = i - n + 1;
+                    for (j = nMax; j <= i; ++j)    //计算区间最大值
+                    {
+                        if (data[j] >= data[nMax]) nMax = j;
+                    }
+                }
+
+                result[i] = i - nMax;
+            }
         }
 
         return result;
@@ -4566,42 +4905,75 @@ function JSAlgorithm(errorHandler, symbolData)
     {
         var result = [];
         if (!Array.isArray(data)) return result;
-        if (n < 1) n = data.length;
-
-        var nMin = null;  //最小值索引
-        for (var i = 0; i < data.length; ++i)
-         {
-            result[i] = null;
-            if (this.IsNumber(data[i])) 
-            {
-                nMin = i;
-                break;
-            }
-        }
-
-        var j = 0;
-        for (i = nMin + 1; i < data.length && j < n; ++i, ++j) //求第1个最大值
+        if (Array.isArray(n))
         {
-            if (data[i] <= data[nMin]) nMin = i;
-            if (n == data.length) result[i] = (i - nMin);
-        }
+            for(var i=0;i<n.length;++i)
+            {
+                result[i]=null;
+                var period=n[i];
+                if (!this.IsNumber(period)) continue;
 
-        for (; i < data.length; ++i) 
-        {
-            if (i - nMin < n) 
-            {
-                if (data[i] <= data[nMin]) nMin = i;
-            }
-            else 
-            {
-                nMin = i - n + 1;
-                for (j = nMin; j <= i; ++j)    //计算区间最小值
+                var start=i-period;
+                if (start<0) start=0;
+                var nMin=null;
+                var j=start;
+                for(; j<data.length;++j)
                 {
-                    if (data[j] <= data[nMin]) nMin = j;
+                    if (this.IsNumber(data[j]))
+                    {
+                        nMin=j;
+                        break;
+                    }
+                }
+
+                for(var k=0; j<data.length && k<period;++k, ++j)
+                {
+                    if (data[j]<=data[nMin]) nMin=j;
+                }
+
+                if (nMin!=null)
+                    result[i]=(i-nMin);
+            }
+        }
+        else
+        {
+            if (n < 1) n = data.length;
+
+            var nMin = null;  //最小值索引
+            for (var i = 0; i < data.length; ++i)
+            {
+                result[i] = null;
+                if (this.IsNumber(data[i])) 
+                {
+                    nMin = i;
+                    break;
                 }
             }
 
-            result[i] = i - nMin;
+            var j = 0;
+            for (i = nMin + 1; i < data.length && j < n; ++i, ++j) //求第1个最大值
+            {
+                if (data[i] <= data[nMin]) nMin = i;
+                if (n == data.length) result[i] = (i - nMin);
+            }
+
+            for (; i < data.length; ++i) 
+            {
+                if (i - nMin < n) 
+                {
+                    if (data[i] <= data[nMin]) nMin = i;
+                }
+                else 
+                {
+                    nMin = i - n + 1;
+                    for (j = nMin; j <= i; ++j)    //计算区间最小值
+                    {
+                        if (data[j] <= data[nMin]) nMin = j;
+                    }
+                }
+
+                result[i] = i - nMin;
+            }
         }
 
         return result;
@@ -4852,35 +5224,57 @@ function JSAlgorithm(errorHandler, symbolData)
         if (!condition) return result;
         var dataCount = condition.length;
         if (!this.IsNumber(dataCount) || dataCount <= 0) return result;
-
-        for (var i = 0; i < dataCount; ++i)    //初始化0
+        if (Array.isArray(n))
         {
-            result[i] = 0;
-        }
-
-        for (var pos = 0; pos < dataCount; ++pos) 
-        {
-            if (this.IsNumber(condition[pos])) break;
-        }
-        if (pos == dataCount) return result;
-
-        var num = Math.min(dataCount - pos, Math.max(n, 1));
-
-        for (var i = dataCount - 1, j = 0; i >= 0; --i) 
-        {
-            var value = condition[i];
-            if (this.IsNumber(value) && value) 
+            for(var i=0;i<dataCount;++i)    //初始化0
             {
-                for (j = i; j > i - num; --j) 
+                result[i]=0;
+            }
+
+            for(var i=0;i<dataCount;++i)
+            {
+                var value=condition[i];
+                var period=n[i];
+                if (this.IsNumber(value) && value && this.IsNumber(period))
                 {
-                    result[j] = 1;
+                    for(var j=i,k=0; j>=0 && k<period; --j,++k)
+                    {
+                        result[j]=1;
+                    }
                 }
             }
         }
-
-        if (condition[i]) 
+        else
         {
-            for (j = i; j >= pos; --j) result[j] = 1;
+            for (var i = 0; i < dataCount; ++i)    //初始化0
+            {
+                result[i] = 0;
+            }
+
+            for (var pos = 0; pos < dataCount; ++pos) 
+            {
+                if (this.IsNumber(condition[pos])) break;
+            }
+            if (pos == dataCount) return result;
+
+            var num = Math.min(dataCount - pos, Math.max(n, 1));
+
+            for (var i = dataCount - 1, j = 0; i >= 0; --i) 
+            {
+                var value = condition[i];
+                if (this.IsNumber(value) && value) 
+                {
+                    for (j = i; j > i - num; --j) 
+                    {
+                        result[j] = 1;
+                    }
+                }
+            }
+
+            if (condition[i]) 
+            {
+                for (j = i; j >= pos; --j) result[j] = 1;
+            }
         }
 
         return result;
@@ -4999,6 +5393,64 @@ function JSAlgorithm(errorHandler, symbolData)
         }
     }
 
+    /*
+    统计连续满足条件的周期数.
+    用法: BARSLASTCOUNT(X),统计连续满足X条件的周期数.
+    例如: BARSLASTCOUNT(CLOSE>OPEN)表示统计连续收阳的周期数
+    */
+   this.BARSLASTCOUNT=function(data)
+   {
+       var result=null;
+       if (Array.isArray(data))
+       {
+           result=[];
+           if (data.length>0)
+           {
+               var count=0;
+               for(var i=data.length-1;i>=0;--i)
+               {
+                   count=0;
+                   for(var j=i;j>=0;--j)
+                   {
+                       if (data[j]) ++count;
+                       else break;
+                   }
+                   result[i]=count;
+               }
+           }
+       }
+       else
+       {
+           if (data) result=1;
+           else result=0;
+       }
+       return result;
+   }
+
+    //取整.
+    //用法: INTPART(A)返回沿A绝对值减小方向最接近的整数
+    //例如:INTPART(12.3)求得12,INTPART(-3.5)求得-3
+    this.INTPART=function(data)
+    {
+        var result=null;
+        if (Array.isArray(data))
+        {
+            result=[];
+            for(var i in data)
+            {
+                var item=data[i];
+                if (this.IsNumber(item)) result[i]=parseInt(item);
+                else result[i]=null;
+            }
+        }
+        else if (this.IsNumber(data))
+        {
+            result=parseInt(data);
+        }
+
+        return result;
+    }
+
     //函数调用
     this.CallFunction=function(name,args,node)
     {
@@ -5010,6 +5462,12 @@ function JSAlgorithm(errorHandler, symbolData)
                 return this.MIN(args[0], args[1]);
             case 'REF':
                 return this.REF(args[0], args[1]);
+            case "REFV":
+                return this.REFV(args[0], args[1]);
+            case 'REFX':
+                return this.REFX(args[0], args[1]);
+            case "REFXV":
+                return this.REFXV(args[0], args[1]);
             case 'ABS':
                 return this.ABS(args[0]);
             case 'MA':
@@ -5020,6 +5478,8 @@ function JSAlgorithm(errorHandler, symbolData)
                 return this.SMA(args[0], args[1],args[2]);
             case "DMA":
                 return this.DMA(args[0], args[1]);
+            case "XMA":
+                return this.XMA(args[0], args[1]);
             case 'EXPMA':
                 return this.EXPMA(args[0], args[1]);
             case 'EXPMEMA':
@@ -5081,8 +5541,12 @@ function JSAlgorithm(errorHandler, symbolData)
                 return this.ZIG(args[0], args[1]);
             case 'TROUGHBARS':
                 return this.TROUGHBARS(args[0], args[1], args[2]);
+            case "TROUGH":
+                return this.TROUGH(args[0],args[1],args[2]);
             case 'PEAKBARS':
                 return this.PEAKBARS(args[0], args[1], args[2]);
+            case 'PEAK':
+                return this.PEAK(args[0],args[1],args[2]);
             case 'COST':
                 return this.COST(args[0]);
             case 'WINNER':
@@ -5135,6 +5599,10 @@ function JSAlgorithm(errorHandler, symbolData)
                 return this.ZTPRICE(args[0], args[1]);
             case 'FRACPART':
                 return this.FRACPART(args[0]);
+            case 'BARSLASTCOUNT':
+                return this.BARSLASTCOUNT(args[0]);
+            case 'INTPART':
+                return this.INTPART(args[0]);
             //三角函数
             case 'ATAN':
                 return this.Trigonometric(args[0], Math.atan);
@@ -5180,6 +5648,13 @@ JSAlgorithm.prototype.IsNumber=function(value)
     return true;
 }
 
+//是否是整形
+JSAlgorithm.prototype.IsInteger=function(x) 
+{
+    return (typeof x === 'number') && (x % 1 === 0);
+}
+
+
 //是否有是有效的除数
 JSAlgorithm.prototype.IsDivideNumber=function(value)
 {
@@ -5220,6 +5695,22 @@ function JSDraw(errorHandler, symbolData)
             {
                 if (this.IsNumber(price[i])) drawData[i]=price[i];
             }
+        }
+
+        return result;
+    }
+
+    this.DRAWTEXT_FIX=function(condition,x,y,type,text)
+    {
+        let result={Position:null, DrawType:'DRAWTEXT_FIX',Text:text};
+        if (condition.length<=0) return result;
+
+        for(var i in condition)
+        {
+            if (isNaN(condition[i]) || !condition[i]) continue;
+
+            result.Position={X:x, Y:y, Type:type};
+            return result;
         }
 
         return result;
@@ -5352,7 +5843,31 @@ function JSDraw(errorHandler, symbolData)
                 }
             }
         }
-
+        if (expand==1) //右延长线
+        {
+            var x2=null;
+            for(var i=drawData.length-1;i>=0;--i)
+            {
+                if (this.IsNumber(drawData[i]))
+                {
+                    x2=i;
+                    break;
+                }
+            }
+            //y3=(y1-y2)*(x3-x1)/(x2-x1)
+            if (x2!=null && x2-1>=0)
+            {
+                var x1=x2-1;
+                for(var i=x2+1;i<drawData.length;++i)
+                {
+                    var y1=drawData[x1];
+                    var y2=drawData[x2];
+                    var y3=(y1-y2)*(i-x1)/(x2-x1);
+                    drawData[i]=y1-y3;
+                }
+            }
+        }
+        
         return result;
     }
 
@@ -5513,7 +6028,11 @@ function JSDraw(errorHandler, symbolData)
 
         let isNumber = typeof (data2) == 'number';
         let text;
-        if (isNumber) text=data2.toFixed(2);
+        if (isNumber) 
+        { 
+            if (this.IsInteger(data2)) text=data2.toString();
+            else text=data2.toFixed(2);
+        }
 
         for (let i in condition) 
         {
@@ -5674,9 +6193,15 @@ JSDraw.prototype.IsNumber = function (value)
     return true;
 }
 
+//是否是整形
+JSDraw.prototype.IsInteger=function(x) 
+{
+    return (typeof x === 'number') && (x % 1 === 0);
+}
+
 JSDraw.prototype.IsDrawFunction=function(name)
 {
-    let setFunctionName = new Set(["STICKLINE", "DRAWTEXT", 'SUPERDRAWTEXT', 'DRAWLINE', 'DRAWBAND', 'DRAWKLINE', 'DRAWKLINE_IF', 'PLOYLINE', 'POLYLINE', 'DRAWNUMBER', 'DRAWICON','DRAWRECTREL']);
+    let setFunctionName = new Set(["STICKLINE", "DRAWTEXT", 'SUPERDRAWTEXT', "DRAWTEXT_FIX", 'DRAWLINE', 'DRAWBAND', 'DRAWKLINE', 'DRAWKLINE_IF', 'PLOYLINE', 'POLYLINE', 'DRAWNUMBER', 'DRAWICON','DRAWRECTREL']);
     if (setFunctionName.has(name)) return true;
 
     return false;
@@ -5958,6 +6483,7 @@ function JSSymbolData(ast,option,jsExecute)
             {
                 var item = industry[i];
                 groupData.Industry.push({ Name: item.name, Symbol: item.symbol });
+                break;  //就存一个1级分类
             }
         }
 
@@ -7137,7 +7663,7 @@ function JSSymbolData(ast,option,jsExecute)
 
         var data = recvData.data;
         var apiKey = this.GenerateCustomAPIKey(args);
-        if (ChartData.IsMinutePeriod(this.Period, true)) 
+        if (JSCommonData.ChartData.IsMinutePeriod(this.Period, true)) 
         {
             if (!data.date || !data.time) return;
 
@@ -7149,7 +7675,7 @@ function JSSymbolData(ast,option,jsExecute)
                 var item = data[key];
             }
         }
-        else if (ChartData.IsDayPeriod(this.Period, true)) 
+        else if (JSCommonData.ChartData.IsDayPeriod(this.Period, true)) 
         {
             if (!data.date) return;
 
@@ -7182,7 +7708,7 @@ function JSSymbolData(ast,option,jsExecute)
         for (var i in data) 
         {
             var value = data[i];
-            var indexItem = new SingleData(); //单列指标数据
+            var indexItem = new JSCommonData.SingleData(); //单列指标数据
             indexItem.Date = date[i];
             if (time && i < time.length) indexItem.Time = time[i];
             indexItem.Value = value;
@@ -7190,14 +7716,14 @@ function JSSymbolData(ast,option,jsExecute)
         }
 
         var aryFittingData;
-        if (ChartData.IsDayPeriod(this.Period, true))
+        if (JSCommonData.ChartData.IsDayPeriod(this.Period, true))
             aryFittingData = kdata.GetFittingData(arySingleData);        //数据和主图K线拟合
-        else if (ChartData.IsMinutePeriod(this.Period, true))
+        else if (JSCommonData.ChartData.IsMinutePeriod(this.Period, true))
             aryFittingData = kdata.GetMinuteFittingData(arySingleData);  //数据和主图K线拟合
         else
             return null;
 
-        var bindData = new ChartData();
+        var bindData = new JSCommonData.ChartData();
         bindData.Data = aryFittingData;
         var result = bindData.GetValue();
         return result;
@@ -7417,6 +7943,23 @@ function JSSymbolData(ast,option,jsExecute)
         return result;
     }
 
+    this.TIME=function()
+    {
+        var result = [];
+        if (!this.Data || !this.Data.Data || !this.Data.Data.length) return result;
+
+        for(let i in this.Data.Data)
+        {
+            var item=this.Data.Data[i];
+            if (this.IsNumber(item.Time))
+                result[i]=item.Time;
+            else
+                result[i]=0;
+        }
+
+        return result;
+    }
+
     this.DATE = function () 
     {
         var result = [];
@@ -7495,10 +8038,23 @@ function JSSymbolData(ast,option,jsExecute)
     this.REFDATE = function (data, date) 
     {
         var result = null;
+
+        var findDate=null;
+        if (Array.isArray(date)) 
+        {
+            if (date.length>0) findDate=date[date.length-1];
+        }
+        else if (this.IsNumber(date))
+        {
+            findDate=date;
+        }
+        if (findDate==null) return null;
+        if (findDate<5000000) findDate+=19000000;
+
         var index = null;
         for (let i in this.Data.Data)   //查找日期对应的索引
         {
-            if (this.Data.Data[i].Date == date) 
+            if (this.Data.Data[i].Date == findDate) 
             {
                 index = parseInt(i);
                 break;
@@ -7747,7 +8303,7 @@ function JSExecute(ast,option)
         ['C', null], ['V', null], ['O', null], ['H', null], ['L', null], ['VOLR', null],
 
         //日期类
-        ['DATE', null], ['YEAR', null], ['MONTH', null], ['PERIOD', null], ['WEEK', null],
+        ['DATE', null], ['YEAR', null], ['MONTH', null], ['PERIOD', null], ['WEEK', null],["TIME",null],
 
         //大盘数据
         ['INDEXA',null],['INDEXC',null],['INDEXH',null],['INDEXL',null],['INDEXO',null],['INDEXV',null],
@@ -7916,6 +8472,8 @@ function JSExecute(ast,option)
             case 'GNBLOCK':
                 return this.SymbolData.GetConcept();
             
+            case 'TIME':
+                return this.SymbolData.TIME();
             case 'DATE':
                 return this.SymbolData.DATE();
             case 'YEAR':
@@ -8029,6 +8587,44 @@ function JSExecute(ast,option)
                         draw.Name=callItem.Callee.Name;
                         this.OutVarTable.push({Name:draw.Name, Draw:draw, Type:1});
                     }
+                    else
+                    {
+                        let outVar=callItem.Out;
+                        varName=`__temp_c_${callItem.Callee.Name}_${i}__`;
+                        var type=0;
+                        if (!Array.isArray(outVar)) outVar=this.SingleDataToArrayData(outVar);
+                        this.OutVarTable.push({Name:varName, Data:outVar,Type:type,NoneName:true});
+                    }
+                }
+                else if (item.Expression.Type==Syntax.Identifier)
+                {
+                    let varName=item.Expression.Name;
+                    let outVar=this.ReadVariable(varName,item.Expression);
+                    var type=0;
+                    if (!Array.isArray(outVar)) 
+                    {
+                        if (typeof(outVar)=='string') outVar=this.SingleDataToArrayData(parseFloat(outVar));
+                        else outVar=this.SingleDataToArrayData(outVar);
+                    }
+
+                    varName="__temp_i_"+i+"__";
+                    this.OutVarTable.push({Name:varName, Data:outVar, Type:type, NoneName:true});
+                }
+                else if (item.Expression.Type==Syntax.BinaryExpression)
+                {
+                    var varName="__temp_b_"+i+"__";
+                    let outVar=item.Expression.Out;
+                    var type=0;
+                    if (!Array.isArray(outVar)) outVar=this.SingleDataToArrayData(outVar);
+                    this.OutVarTable.push({Name:varName, Data:outVar,Type:type, NoneName:true});
+                }
+                else if (item.Expression.Type==Syntax.LogicalExpression)    //逻辑语句 如 T1 AND T2 
+                {
+                    var varName="__temp_l_"+i+"__";
+                    let outVar=item.Expression.Out;
+                    var type=0;
+                    if (!Array.isArray(outVar)) outVar=this.SingleDataToArrayData(outVar);
+                    this.OutVarTable.push({Name:varName, Data:outVar,Type:type, NoneName:true});
                 }
                 else if (item.Expression.Type==Syntax.SequenceExpression)
                 {
@@ -8046,6 +8642,10 @@ function JSExecute(ast,option)
                     let isExData = false;
                     let isDotLine = false;
                     let isOverlayLine = false;    //叠加线
+                    let isNoneName=false;
+                    //显示在位置之上,对于DRAWTEXT和DRAWNUMBER等函数有用,放在语句的最后面(不能与LINETHICK等函数共用),比如:
+                    //DRAWNUMBER(CLOSE>OPEN,HIGH,CLOSE),DRAWABOVE;
+                    var isDrawAbove=false;  
                     for(let j in item.Expression.Expression)
                     {
                         let itemExpression=item.Expression.Expression[j];
@@ -8069,11 +8669,21 @@ function JSExecute(ast,option)
                             else if (value==='LINESTICK') lineStick=true;
                             else if (value==='STICK') stick=true;
                             else if (value==='VOLSTICK') volStick=true;
+                            else if (value==="DRAWABOVE") isDrawAbove=true;
                             else if (value.indexOf('COLOR')==0) color=value;
                             else if (value.indexOf('LINETHICK')==0) lineWidth=value;
                             else if (value.indexOf('NODRAW') == 0) isShow = false;
                             else if (value.indexOf('EXDATA') == 0) isExData = true; //扩展数据, 不显示再图形里面
                             else if (value.indexOf('LINEOVERLAY') == 0) isOverlayLine = true;
+                            else
+                            {
+                                varName=itemExpression.Name;
+                                let varValue=this.ReadVariable(varName,itemExpression);
+                                if (!Array.isArray(varValue)) varValue=this.SingleDataToArrayData(varValue); 
+                                varName="__temp_si_"+i+"__";
+                                isNoneName=true;
+                                this.VarTable.set(varName,varValue);            //放到变量表里
+                            }
                         }
                         else if (itemExpression.Type == Syntax.Literal)    //常量
                         {
@@ -8081,10 +8691,27 @@ function JSExecute(ast,option)
                             varName = itemExpression.Value.toString();
                             this.VarTable.set(varName, aryValue);    //把常量放到变量表里
                         }
-                        else if (itemExpression.Type==Syntax.CallExpression && this.Draw.IsDrawFunction(itemExpression.Callee.Name))
+                        else if (itemExpression.Type==Syntax.CallExpression)
                         {
-                            draw=itemExpression.Draw;
-                            draw.Name=itemExpression.Callee.Name;
+                            if (this.Draw.IsDrawFunction(itemExpression.Callee.Name))
+                            {
+                                draw=itemExpression.Draw;
+                                draw.Name=itemExpression.Callee.Name;
+                            }
+                            else
+                            {
+                                let varValue=itemExpression.Out;
+                                varName=`__temp_sc_${itemExpression.Callee.Name}_${i}__`;
+                                isNoneName=true;
+                                this.VarTable.set(varName,varValue);
+                            }
+                        }
+                        else if (itemExpression.Type==Syntax.BinaryExpression)
+                        {
+                            varName="__temp_sb_"+i+"__";
+                            let aryValue=itemExpression.Out;
+                            isNoneName=true;
+                            this.VarTable.set(varName,aryValue);
                         }
                     }
 
@@ -8136,6 +8763,7 @@ function JSExecute(ast,option)
                         if (isExData == true) value.IsExData = true;
                         if (isDotLine == true) value.IsDotLine = true;
                         if (isOverlayLine == true) value.IsOverlayLine = true;
+                        if (isNoneName==true) value.NoneName=true;
                         this.OutVarTable.push(value);
                     }
                     else if (draw)
@@ -8143,12 +8771,14 @@ function JSExecute(ast,option)
                         var outVar = { Name: draw.Name, Draw: draw, Type: 1 };
                         if (color) outVar.Color = color;
                         if (lineWidth) outVar.LineWidth = lineWidth;
+                        if (isDrawAbove) outVar.IsDrawAbove=true;
                         this.OutVarTable.push(outVar);
                     }
                     else if (colorStick && varName)  //CYW: SUM(VAR4,10)/10000, COLORSTICK; 画上下柱子
                     {
                         let outVar=this.VarTable.get(varName);
                         let value={Name:varName, Data:outVar, Color:color, Type:2};
+                        if (lineWidth) value.LineWidth=lineWidth;
                         this.OutVarTable.push(value);
                     }
                     else if (varName) 
@@ -8252,6 +8882,10 @@ function JSExecute(ast,option)
             case 'SUPERDRAWTEXT':
                 node.Draw = this.Draw.SUPERDRAWTEXT(args[0], args[1], args[2], args[3], args[4]);
                 node.Out = [];
+                break;
+            case 'DRAWTEXT_FIX':
+                node.Draw=this.Draw.DRAWTEXT_FIX(args[0],args[1],args[2],args[3],args[4]);
+                node.Out=[];
                 break;
             case 'DRAWICON':
                 node.Draw = this.Draw.DRAWICON(args[0], args[1], args[2]);

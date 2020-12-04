@@ -83,7 +83,7 @@ function IFrameSplitOperator()
 
     this.Filter = function (aryInfo, keepZero)   //keepZero 保留0轴
     {
-        if (this.SplitCount <= 0 || aryInfo.length <= 0 || aryInfo.length < this.SplitCount) return aryInfo;
+        if (this.SplitCount <= 0 || aryInfo.length <= 0 || aryInfo.length <= this.SplitCount) return aryInfo;
 
         //分割线比预设的多, 过掉一些
         var filter = parseInt(aryInfo.length / this.SplitCount);
@@ -196,94 +196,114 @@ function IFrameSplitOperator()
 }
 
 //字符串格式化 千分位分割
-IFrameSplitOperator.FormatValueThousandsString = function (value, floatPrecision) 
+IFrameSplitOperator.FormatValueThousandsString=function(value,floatPrecision)
 {
-    if (value == null || isNaN(value)) 
+    if (value==null || isNaN(value))
     {
-        if (floatPrecision > 0) 
+        if (floatPrecision>0)
         {
-            var nullText = '-.';
-            for (var i = 0; i < floatPrecision; ++i)
-                nullText += '-';
+            var nullText='-.';
+            for(var i=0;i<floatPrecision;++i)
+                nullText+='-';
             return nullText;
         }
 
         return '--';
     }
 
-    var result = '';
-    var num = value.toFixed(floatPrecision);
-    while (num.length > 3) 
-    {
-        result = ',' + num.slice(-3) + result;
-        num = num.slice(0, num.length - 3);
+    var result='';
+    var num=value.toFixed(floatPrecision);
+    if(floatPrecision>0){
+        var numFloat = num.split('.')[1];
+        var numM = num.split('.')[0];
+        while (numM.length > 3)
+        {
+            result = ',' + numM.slice(-3) + result;
+            numM = numM.slice(0, numM.length - 3);
+        }
+        if (numM) { result = numM + result + '.' + numFloat; }
+    }else{
+        while (num.length > 3)
+        {
+            result = ',' + num.slice(-3) + result;
+            num = num.slice(0, num.length - 3);
+        }
+        if (num) { result = num + result; }
     }
-    if (num) { result = num + result; }
+    
     return result;
 }
 
-//数据输出格式化 floatPrecision=小数位数 languageID=语言
-IFrameSplitOperator.FormatValueString = function (value, floatPrecision, languageID) 
+//数据输出格式化 floatPrecision=小数位数
+IFrameSplitOperator.FormatValueString=function(value, floatPrecision,languageID)
 {
-    if (value == null || isNaN(value)) 
+    if (value==null || isNaN(value))
     {
-        if (floatPrecision > 0) 
+        if (floatPrecision>0)
         {
-            var nullText = '-.';
-            for (var i = 0; i < floatPrecision; ++i)
-                nullText += '-';
+            var nullText='-.';
+            for(var i=0;i<floatPrecision;++i)
+                nullText+='-';
             return nullText;
         }
 
         return '--';
     }
 
-    if (value < 0.00000000001 && value > -0.00000000001) 
+    if (value<0.00000000001 && value>-0.00000000001)
     {
         return "0";
     }
 
     var absValue = Math.abs(value);
-    if (languageID === JSCHART_LANGUAGE_ID.LANGUAGE_ENGLISH_ID) 
+    if (languageID===JSCHART_LANGUAGE_ID.LANGUAGE_ENGLISH_ID)
     {
         if (absValue < 10000)
             return value.toFixed(floatPrecision);
         else if (absValue < 1000000)
-            return (value / 1000).toFixed(floatPrecision) + "K";
+            return (value/1000).toFixed(floatPrecision)+"K";
         else if (absValue < 1000000000)
-            return (value / 1000000).toFixed(floatPrecision) + "M";
+            return (value/1000000).toFixed(floatPrecision)+"M";
         else if (absValue < 1000000000000)
-            return (value / 1000000000).toFixed(floatPrecision) + "B";
-        else
-            return (value / 1000000000000).toFixed(floatPrecision) + "T";
+            return (value/1000000000).toFixed(floatPrecision)+"B";
+        else 
+            return (value/1000000000000).toFixed(floatPrecision)+"T";
     }
     else
     {
-        if (absValue < 10000) 
+        if (absValue < 10000)
             return value.toFixed(floatPrecision);
-        else if (absValue < 100000000) 
-            return (value / 10000).toFixed(floatPrecision) + "万";
-        else if (absValue < 1000000000000) 
-            return (value / 100000000).toFixed(floatPrecision) + "亿";
-        else 
-            return (value / 1000000000000).toFixed(floatPrecision) + "万亿";
+        else if (absValue < 100000000)
+            return (value/10000).toFixed(floatPrecision)+"万";
+        else if (absValue < 1000000000000)
+            return (value/100000000).toFixed(floatPrecision)+"亿";
+        else
+            return (value/1000000000000).toFixed(floatPrecision)+"万亿";
     }
 
-    return TRUE;
+    return '';
 }
 
-IFrameSplitOperator.NumberToString = function (value) 
+//整形输出格式化 floatPrecision=小数位数
+IFrameSplitOperator.FromatIntegerString=function(value, floatPrecision,languageID)
 {
-    if (value < 10) return '0' + value.toString();
+    if (value<10000 && IFrameSplitOperator.IsInteger(value)) floatPrecision=0;  //<10000的整形 去掉小数位数
+    return IFrameSplitOperator.FormatValueString(value, floatPrecision,languageID);
+}
+
+IFrameSplitOperator.NumberToString=function(value)
+{
+    if (value<10) return '0'+value.toString();
     return value.toString();
 }
 
-IFrameSplitOperator.FormatDateString = function (value, format) 
+IFrameSplitOperator.FormatDateString=function(value,format)
 {
-    var year = parseInt(value / 10000);
-    var month = parseInt(value / 100) % 100;
-    var day = value % 100;
-    switch (format) 
+    var year=parseInt(value/10000);
+    var month=parseInt(value/100)%100;
+    var day=value%100;
+
+    switch(format)
     {
         case 'MM-DD':
             return IFrameSplitOperator.NumberToString(month) + '-' + IFrameSplitOperator.NumberToString(day);
@@ -292,104 +312,145 @@ IFrameSplitOperator.FormatDateString = function (value, format)
     }
 }
 
-IFrameSplitOperator.FormatTimeString = function (value, format) 
+IFrameSplitOperator.FormatTimeString=function(value, format)    //format hh:mm:ss
 {
-    if (format == 'HH:MM:SS') 
+    if (format=='HH:MM:SS')
     {
-        var hour = parseInt(value / 10000);
-        var minute = parseInt((value % 10000) / 100);
-        var second = value % 100;
-        return IFrameSplitOperator.NumberToString(hour) + ':' + IFrameSplitOperator.NumberToString(minute) + ':' + IFrameSplitOperator.NumberToString(second);
+        var hour=parseInt(value/10000);
+        var minute=parseInt((value%10000)/100);
+        var second=value%100;
+        return IFrameSplitOperator.NumberToString(hour)+':'+ IFrameSplitOperator.NumberToString(minute) + ':' + IFrameSplitOperator.NumberToString(second);
     }
-    else 
+    else if (format == 'HH:MM') 
     {
         var hour = parseInt(value / 100);
         var minute = value % 100;
-
         return IFrameSplitOperator.NumberToString(hour) + ':' + IFrameSplitOperator.NumberToString(minute);
+    }
+    else 
+    {
+        if (value < 10000)
+        {
+            var hour = parseInt(value / 100);
+            var minute = value % 100;
+            return IFrameSplitOperator.NumberToString(hour) + ':' + IFrameSplitOperator.NumberToString(minute);
+        }
+        else
+        {
+            var hour = parseInt(value / 10000);
+            var minute = parseInt((value % 10000) / 100);
+            var second = value % 100;
+            return IFrameSplitOperator.NumberToString(hour) + ':' + IFrameSplitOperator.NumberToString(minute) + ':' + IFrameSplitOperator.NumberToString(second);
+        }
+        
     }
 }
 
 //报告格式化
-IFrameSplitOperator.FormatReportDateString = function (value)
- {
-    var year = parseInt(value / 10000);
-    var month = parseInt(value / 100) % 100;
+IFrameSplitOperator.FormatReportDateString=function(value)
+{
+    var year=parseInt(value/10000);
+    var month=parseInt(value/100)%100;
     var monthText;
-    switch (month) {
+    switch(month)
+    {
         case 3:
-            monthText = "一季度报";
+            monthText="一季度报";
             break;
         case 6:
-            monthText = "半年报";
+            monthText="半年报";
             break;
         case 9:
-            monthText = "三季度报";
+            monthText="三季度报";
             break;
         case 12:
-            monthText = "年报";
+            monthText="年报";
             break;
     }
 
-    return year.toString() + monthText;
+    return year.toString()+ monthText;
 }
 
-IFrameSplitOperator.FormatDateTimeString = function (value, foramt) 
+IFrameSplitOperator.FormatDateTimeString=function(value,isShowDate)
 {
-    var aryValue = value.split(' ');
-    if (aryValue.length < 2) return "";
+    var aryValue=value.split(' ');
+    if (aryValue.length<2) return "";
+    var time=parseInt(aryValue[1]);
+    var minute=time%100;
+    var hour=parseInt(time/100);
+    var text=(hour<10? ('0'+hour.toString()):hour.toString()) + ':' + (minute<10?('0'+minute.toString()):minute.toString());
 
-    var time = parseInt(aryValue[1]);
-    var minute = time % 100;
-    var hour = parseInt(time / 100);
-    var date = parseInt(aryValue[0]);
-    var year = parseInt(date / 10000);
-    var month = parseInt(date % 10000 / 100);
-    var day = date % 100;
-
-    switch (foramt) {
-        case 'YYYY-MM-DD HH-MM':
-            return year.toString() + '-' + IFrameSplitOperator.NumberToString(month) + '-' + IFrameSplitOperator.NumberToString(day) + ' ' + IFrameSplitOperator.NumberToString(hour) + ':' + IFrameSplitOperator.NumberToString(minute);
-        case 'YYYY-MM-DD':
-            return year.toString() + '-' + IFrameSplitOperator.NumberToString(month) + '-' + IFrameSplitOperator.NumberToString(day);
-        default:
-            return IFrameSplitOperator.NumberToString(hour) + ':' + IFrameSplitOperator.NumberToString(minute);
-
+    if (isShowDate==true)
+    {
+        var date=parseInt(aryValue[0]);
+        var year=parseInt(date/10000);
+        var month=parseInt(date%10000/100);
+        var day=date%100;
+        text=year.toString() +'-'+ (month<10? ('0'+month.toString()) :month.toString()) +'-'+ (day<10? ('0'+day.toString()):day.toString()) +" " +text;
     }
 
     return text;
 }
 
-IFrameSplitOperator.IsNumber = function (value) 
+//字段颜色格式化
+IFrameSplitOperator.FormatValueColor = function (value, value2) 
 {
-    if (value == null) return false;
+    if (value != null && value2 == null)  //只传一个值的 就判断value正负
+    {
+        if (value == 0) return 'PriceNull';
+        else if (value > 0) return 'PriceUp';
+        else return 'PriceDown';
+    }
+
+    //2个数值对比 返回颜色
+    if (value == null || value2 == null) return 'PriceNull';
+    if (value == value2) return 'PriceNull';
+    else if (value > value2) return 'PriceUp';
+    else return 'PriceDown';
+}
+
+IFrameSplitOperator.IsNumber=function(value)
+{
+    if (value==null) return false;
     if (isNaN(value)) return false;
+
     return true;
 }
 
-IFrameSplitOperator.IsPlusNumber = function (value) //判断是否是正数
+//判断是否是正数
+IFrameSplitOperator.IsPlusNumber=function(value)
 {
-    if (value == null) return false;
+    if (value==null) return false;
     if (isNaN(value)) return false;
-    return value > 0;
+
+    return value>0;
 }
 
-IFrameSplitOperator.IsInteger = function (x) //是否是整形
+//是否是整形
+IFrameSplitOperator.IsInteger=function(x) 
 {
     return (typeof x === 'number') && (x % 1 === 0);
 }
 
-IFrameSplitOperator.IsObjectExist = function (obj) //判断字段是否存在
+//判断字段是否存在
+IFrameSplitOperator.IsObjectExist=function(obj)
 {
-    if (obj === undefined) return false;
-    if (obj == null) return false;
-
+    if (obj===undefined) return false;
+    if (obj==null) return false;
+    
     return true;
 }
 
-IFrameSplitOperator.IsString = function (value) 
+//是否时bool
+IFrameSplitOperator.IsBool=function(value)
 {
-    if (value && typeof (value) == 'string') return true;
+    if (value===true || value===false) return true;
+    return false;
+}
+
+IFrameSplitOperator.IsString=function(value)
+{
+    if (value && typeof(value)=='string') return true;
     return false;
 }
 
@@ -404,6 +465,7 @@ function FrameSplitKLinePriceY()
     this.Symbol;
     this.Data;              //K线数据 (计算百分比坐标)
     this.FrameSplitData2;   //坐标轴分割方法(计算百分比刻度)
+    this.FloatPrecision = null;   //小数位数 (设置了就使用这个位数,否则使用品种对应的小数位数)
 
     this.Custom = []; //[{Type:0}];   定制刻度 0=显示最后的价格刻度
     this.SplitType = 0;       //0=自动分割  1=固定分割
@@ -417,7 +479,8 @@ function FrameSplitKLinePriceY()
         splitData.Interval = (splitData.Max - splitData.Min) / (splitData.Count - 1);
 
         var defaultfloatPrecision = JSCommonCoordinateData.GetfloatPrecision(this.Symbol);
-        if (JSCommonCoordinateData.MARKET_SUFFIX_NAME.IsSHSZIndex(this.Symbol)) defaultfloatPrecision = 0;    //手机端指数不显示小数位数,
+        if (JSCommonCoordinateData.MARKET_SUFFIX_NAME.IsSHSZIndex(this.Symbol)) defaultfloatPrecision = 0;    //手机端指数不显示小数位数
+        if (this.FloatPrecision != null) defaultfloatPrecision = this.FloatPrecision;
 
         switch (this.CoordinateType)
         {
@@ -491,7 +554,10 @@ function FrameSplitKLinePriceY()
             var item = this.Custom[i];
             if (item.Type == 0)     //最新价格刻度
             {
-                var latestItem = this.GetLatestPrice(floatPrecision, item);
+                var dec=floatPrecision;
+                //外部设置小数位数
+                if (IFrameSplitOperator.IsNumber(item.FloatPrecision) && item.FloatPrecision>=0) dec=item.FloatPrecision;
+                var latestItem = this.GetLatestPrice(dec, item);
                 if (latestItem) this.Frame.CustomHorizontalInfo.push(latestItem);
             }
             else if (item.Type == 1)    //固定价格刻度
@@ -510,11 +576,14 @@ function FrameSplitKLinePriceY()
         info.Type = 0;
         info.Value = latestItem.Close;
         info.TextColor = g_JSChartResource.FrameLatestPrice.TextColor;
+        info.LineType = 2;    //虚线
         if (option.Position == 'left') info.Message[0] = latestItem.Close.toFixed(floatPrecision);
         else info.Message[1] = latestItem.Close.toFixed(floatPrecision);
         if (latestItem.Close > latestItem.Open) info.LineColor = g_JSChartResource.FrameLatestPrice.UpBarColor;
         else if (latestItem.Close < latestItem.Open) info.LineColor = g_JSChartResource.FrameLatestPrice.DownBarColor;
         else info.LineColor = g_JSChartResource.FrameLatestPrice.UnchagneBarColor;
+
+        if (IFrameSplitOperator.IsNumber(option.LineType)) info.LineType=option.LineType;
         if (option.IsShowLine == false) info.LineType = -1;
 
         return info;
@@ -545,6 +614,7 @@ function FrameSplitKLinePriceY()
             info.TextColor = item.TextColor;
             info.LineColor = item.Color;
             info.LineType = 2;    //虚线
+            if (IFrameSplitOperator.IsNumber(option.LineType)) info.LineType=option.LineType;
             if (option.IsShowLine == false) info.LineType = -1;
 
             info.Value = item.Value;
@@ -838,11 +908,13 @@ function FrameSplitKLineX()
         var xOffset = this.Frame.Data.DataOffset;
         var xPointCount = this.Frame.XPointCount;
         var lastYear = null, lastMonth = null;
+        var monthCount=0;
 
         for (var i = 0, index = xOffset, distance = this.MinDistance; i < xPointCount && index < this.Frame.Data.Data.length; ++i, ++index) 
         {
             var year = parseInt(this.Frame.Data.Data[index].Date / 10000);
             var month = parseInt(this.Frame.Data.Data[index].Date / 100) % 100;
+            if (lastMonth != month) ++monthCount;
 
             if ((distance < this.MinDistance && lastYear == year) ||
                 (lastYear != null && lastYear == year && lastMonth != null && lastMonth == month)) 
@@ -867,6 +939,51 @@ function FrameSplitKLineX()
 
             lastYear = year;
             lastMonth = month;
+
+            if (this.ShowText) 
+            {
+                info.Message[0] = text;
+            }
+
+            this.Frame.VerticalInfo.push(info);
+            distance = 0;
+        }
+
+        if (this.Period == 0 && monthCount <= 2)
+            this.SplitShortDate();
+    }
+
+    //分隔在2个月一下的格式
+    this.SplitShortDate = function () 
+    {
+        this.Frame.VerticalInfo = [];
+        var xOffset = this.Frame.Data.DataOffset;
+        var xPointCount = this.Frame.XPointCount;
+        var minDistance = 12;
+        var isFirstYear = true;
+        for (var i = 0, index = xOffset, distance = minDistance; i < xPointCount && index < this.Frame.Data.Data.length; ++i, ++index) {
+            var year = parseInt(this.Frame.Data.Data[index].Date / 10000);
+            //var month=parseInt(this.Frame.Data.Data[index].Date/100)%100;
+            //var day=parseInt(this.Frame.Data.Data[index].Date%100);
+
+            if (distance < minDistance) 
+            {
+                ++distance;
+                continue;
+            }
+
+            var info = new CoordinateInfo();
+            info.Value = index - xOffset;
+            var text;
+            if (isFirstYear) 
+            {
+                text = year.toString();
+                isFirstYear = false;
+            }
+            else 
+            {
+                text = IFrameSplitOperator.FormatDateString(this.Frame.Data.Data[index].Date, 'MM-DD');
+            }
 
             if (this.ShowText) 
             {
@@ -977,6 +1094,7 @@ function FrameSplitMinutePriceY()
             var distanceValue = Math.max(Math.abs(this.YClose - max), Math.abs(this.YClose - min));
             max = this.YClose + distanceValue;
             min = this.YClose - distanceValue;
+            if (min<0) min=range.Min;
         }
 
         var showCount = this.SplitCount;
@@ -1020,8 +1138,39 @@ function FrameSplitMinutePriceY()
         for (var i in this.Custom) 
         {
             var item = this.Custom[i];
-            if (item.Type == 1) this.CustomFixedCoordinate(item);
+            if (item.Type == 1) 
+                this.CustomFixedCoordinate(item);
+            else if (item.Type==0)
+            {
+                var defaultfloatPrecision = JSCommonCoordinateData.GetfloatPrecision(this.Symbol);
+                var latestItem = this.GetLatestPrice(defaultfloatPrecision, item);
+                if (latestItem) this.Frame.CustomHorizontalInfo.push(latestItem);
+            }
         }
+    }
+
+    this.GetLatestPrice = function (floatPrecision, option) 
+    {
+        if (!this.Data || !this.Data.Data) return null;
+        if (this.Data.Data.length <= 0) return null;
+        var price = this.Data.Data[this.Data.Data.length - 1];
+        if (!IFrameSplitOperator.IsNumber(price) || !IFrameSplitOperator.IsNumber(this.YClose)) return null;
+
+        var info = new CoordinateInfo();
+        info.Type = 0;
+        info.Value = price;
+        info.TextColor = g_JSChartResource.FrameLatestPrice.TextColor;
+        info.LineType = 2;    //虚线
+        if (option.Position == 'left') info.Message[0] = price.toFixed(floatPrecision);
+        else info.Message[1] = price.toFixed(floatPrecision);
+        if (price > this.YClose) info.LineColor = g_JSChartResource.FrameLatestPrice.UpBarColor;
+        else if (price < this.YClose) info.LineColor = g_JSChartResource.FrameLatestPrice.DownBarColor;
+        else info.LineColor = g_JSChartResource.FrameLatestPrice.UnchagneBarColor;
+
+        if (IFrameSplitOperator.IsNumber(option.LineType)) info.LineType=option.LineType;
+        if (option.IsShowLine == false) info.LineType = -1;
+
+        return info;
     }
 
     this.CustomFixedCoordinate = function (option)    //固定坐标刻度
@@ -1035,6 +1184,7 @@ function FrameSplitMinutePriceY()
             info.TextColor = item.TextColor;
             info.LineColor = item.Color;
             info.LineType = 2;    //虚线
+            if (IFrameSplitOperator.IsNumber(option.LineType)) info.LineType=option.LineType;
             if (option.IsShowLine == false) info.LineType = -1;
 
             if (IFrameSplitOperator.IsNumber(item.Increase)) //涨幅计算价格

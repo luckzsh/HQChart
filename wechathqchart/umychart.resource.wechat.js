@@ -17,11 +17,12 @@ function JSChartResource()
 
     this.SelectRectBGColor = "rgba(1,130,212,0.06)"; //背景色
     //   this.SelectRectAlpha=0.06;                  //透明度
-    this.BGColor = 'rgb(255,255,255)';          //背景色
+    this.BGColor = 'rgb(255,255,255)';              //背景色
 
     this.UpBarColor = "rgb(238,21,21)";
     this.DownBarColor = "rgb(25,158,0)";
     this.UnchagneBarColor = "rgb(0,0,0)";
+    this.MinKLineBarWidth=4;                        //最小的柱子宽度 比这个还小就画直线 
 
     this.Minute = {};
     this.Minute.VolBarColor = "rgb(238,127,9)";
@@ -31,8 +32,8 @@ function JSChartResource()
 
     this.DefaultTextColor = "rgb(43,54,69)";
     this.DefaultTextFont = '14px 微软雅黑';
-
-    this.DynamicTitleFont = '12px 微软雅黑'; //指标动态标题字体
+    this.IndexTitleBGColor='rgb(217,219,220)';     //指标名字背景色
+    this.DynamicTitleFont = '12px 微软雅黑';        //指标动态标题字体
 
     this.UpTextColor = "rgb(238,21,21)";
     this.DownTextColor = "rgb(25,158,0)";
@@ -44,17 +45,26 @@ function JSChartResource()
     this.FrameSplitPen = "rgb(225,236,242)";          //分割线
     this.FrameSplitTextColor = "rgb(51,51,51)";     //刻度文字颜色
     this.FrameSplitTextFont = "12px 微软雅黑";        //坐标刻度文字字体
+    this.FrameYLineDash=[2, 2];                     //Y轴线段虚线点间距,填null 就是实线
     //this.FrameSplitTextFont = "14px PingFang-SC-Bold";//坐标刻度文字字体
     this.FrameTitleBGColor = "rgb(246,251,253)";      //标题栏背景色
-    this.Frame = { XBottomOffset: 0 };   //X轴文字向下偏移
+    this.Frame = { 
+        XBottomOffset: 0 ,  //X轴文字向下偏移
+        YTopOffset:2    //Y轴顶部文字向下偏移
+    };   
 
-    this.FrameLatestPrice = {
+    this.FrameLatestPrice = 
+    {
         TextColor: 'rgb(255,255,255)',   //最新价格文字颜色
         UpBarColor: "rgb(238,21,21)",    //上涨
         DownBarColor: "rgb(25,158,0)",   //下跌
         UnchagneBarColor: "rgb(0,0,0)",   //平盘
         BGAlpha: 0.6
     };
+
+    this.FrameMargin = 4;     //左右一共的边距
+    this.FrameLeftMargin = 2;
+    this.FrameRightMargin=2;
 
     this.CorssCursorBGColor = "rgb(43,54,69)";            //十字光标背景
     this.CorssCursorTextColor = "rgb(255,255,255)";
@@ -196,6 +206,38 @@ function JSChartResource()
         TextBGColor: 'rgba(255,255,255,0.8)'
     };
 
+    //单图标指标ChartSingleText -> DRAWICON
+    this.DRAWICON=
+    {
+        Text:
+        {
+            MaxSize:50,  //字体最大
+            MinSize:20,  //字体最小
+    
+            Zoom:
+            {
+                Type:2,    //0=放大(K线宽度*Value) 1=放大(K线+间距)*Value 2=(K线+间距)+2*Value;
+                Value:1
+            },
+
+            FontName:'Arial'    //字体
+        }
+    }
+
+    this.DRAWTEXT=
+    {
+        MaxSize:18,  //字体最大
+        MinSize:18,  //字体最小
+
+        Zoom:
+        {
+            Type:1,    //0=放大(K线宽度*Value) 1=放大(K线+间距)*Value 2=(K线+间距)+2*Value;
+            Value:1
+        },
+
+        FontName:'微软雅黑'    //字体
+    }
+
     // //自定义风格
     this.SetStyle = function (style) 
     {
@@ -211,10 +253,12 @@ function JSChartResource()
             if (style.Minute.VolBarColor) this.Minute.VolBarColor = style.Minute.VolBarColor;
             if (style.Minute.PriceColor) this.Minute.PriceColor = style.Minute.PriceColor;
             if (style.Minute.AvPriceColor) this.Minute.AvPriceColor = style.Minute.AvPriceColor;
+            if (style.Minute.AreaPriceColor) this.Minute.AreaPriceColor = style.Minute.AreaPriceColor;
         }
         if (style.DefaultTextColor) this.DefaultTextColor = style.DefaultTextColor;
         if (style.DefaultTextFont) this.DefaultTextFont = style.DefaultTextFont;
         if (style.DynamicTitleFont) this.DynamicTitleFont = style.DynamicTitleFont;
+        if (style.IndexTitleBGColor) this.IndexTitleBGColor=style.IndexTitleBGColor;
         if (style.UpTextColor) this.UpTextColor = style.UpTextColor;
         if (style.DownTextColor) this.DownTextColor = style.DownTextColor;
         if (style.UnchagneTextColor) this.UnchagneTextColor = style.UnchagneTextColor;
@@ -229,6 +273,7 @@ function JSChartResource()
         if (style.Frame) 
         {
             if (style.Frame.XBottomOffset) this.Frame.XBottomOffset = style.Frame.XBottomOffset;
+            if (style.Frame.YTopOffset) this.Frame.YTopOffset = style.Frame.YTopOffset;
         }
 
         if (style.FrameLatestPrice) 
@@ -266,6 +311,27 @@ function JSChartResource()
             if (style.TooltipPaint.BorderColor) this.TooltipPaint.BorderColor = style.TooltipPaint.BorderColor;
             if (style.TooltipPaint.TitleColor) this.TooltipPaint.TitleColor = style.TooltipPaint.TitleColor;
             if (style.TooltipPaint.TitleFont) this.TooltipPaint.TitleFont = style.TooltipPaint.TitleFont;
+        }
+
+        if (style.DRAWICON) 
+        {
+            if (style.DRAWICON.Text)
+            {
+                var item=style.DRAWICON.Text;
+                if (IFrameSplitOperator.IsPlusNumber(item.MaxSize)) this.DRAWICON.Text.MaxSize=item.MaxSize;
+                if (IFrameSplitOperator.IsPlusNumber(item.MinSize)) this.DRAWICON.Text.MinSize=item.MinSize;
+                if (item.Zoom) this.DRAWICON.Text.Zoom=item.Zoom;
+                if (item.FontName) this.DRAWICON.Text.FontName=item.FontName;
+            }
+        }
+
+        if (style.DRAWTEXT)
+        {
+            var item=style.DRAWTEXT;
+            if (IFrameSplitOperator.IsPlusNumber(item.MaxSize)) this.DRAWICON.MaxSize=item.MaxSize;
+            if (IFrameSplitOperator.IsPlusNumber(item.MinSize)) this.DRAWICON.MinSize=item.MinSize;
+            if (item.Zoom) this.DRAWICON.Zoom=item.Zoom;
+            if (item.FontName) this.DRAWICON.FontName=item.FontName;
         }
     }
 
@@ -323,7 +389,7 @@ function JSChartLocalization()
         ['1分', { CN: '1分', EN: '1Min' }],
         ['5分', { CN: '5分', EN: '5Min' }],
         ['15分', { CN: '15分', EN: '15Min' }],
-        ['30分', { CN: '30', EN: '30Min' }],
+        ['30分', { CN: '30分', EN: '30Min' }],
         ['60分', { CN: '60分', EN: '60Min' }],
         ['季线', { CN: '季线', EN: '1Q' }],
         ['分笔', { CN: '分笔', EN: 'Tick' }],

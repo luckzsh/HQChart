@@ -17,6 +17,7 @@ import sys
 from umychart_complier_util import xrange, unicode, uchr, uord
 from umychart_complier_scanner import Scanner, RawToken, ErrorHandler, Error, Messages
 from umychart_complier_job import JS_EXECUTE_JOB_ID, JobItem
+from umychart_complier_help import Variant
 
 
 TOKEN_NAME={ }
@@ -193,10 +194,11 @@ class Node:
         self.IsNeedIndexData=False         # 是否需要大盘数据
         self.IsNeedLatestData=False        # 是否需要最新的个股行情数据
         self.IsNeedSymbolData=False        # 是否需要下载股票数据
-        self.IsNeedFinanceData=set()       # 需要下载的财务数据
         self.IsNeedMarginData = set()      # 融资融券
         self.IsNeedNewsAnalysisData = set()      # 新闻统计数据
         self.IsNeedBlockIncreaseData = set()     # 是否需要市场涨跌股票数据统计
+
+        self.NeedFinanceData=[]            # 需要下载的财务数据
 
     def GetDataJobList(self) :  #下载数据任务列表
         jobs=[]
@@ -212,11 +214,11 @@ class Node:
             jobs.append(JobItem(id=JS_EXECUTE_JOB_ID.JOB_DOWNLOAD_INDEX_INCREASE_DATA, symbol=blockSymbol ))
 
         # 加载财务数据
-        for jobID in self.IsNeedFinanceData :
-            if jobID == JS_EXECUTE_JOB_ID.JOB_DOWNLOAD_DIVIDEND_YIELD_DATA :      # 股息率 需要总市值
+        for jobItem in self.NeedFinanceData :
+            if jobItem.ID == JS_EXECUTE_JOB_ID.JOB_DOWNLOAD_DIVIDEND_YIELD_DATA :      # 股息率 需要总市值
                 jobs.append(JobItem(id=JS_EXECUTE_JOB_ID.JOB_DOWNLOAD_MARKETVALUE_DATA))
 
-            jobs.append(JobItem(id=jobID))
+            jobs.append(jobItem)
 
         # 加载融资融券
         for jobID in self.IsNeedMarginData :
@@ -240,12 +242,13 @@ class Node:
 
         #流通股本（手）
         if varName=='CAPITAL' :
-            if JS_EXECUTE_JOB_ID.JOB_DOWNLOAD_CAPITAL_DATA not in self.IsNeedFinanceData :
-                self.IsNeedFinanceData.add(JS_EXECUTE_JOB_ID.JOB_DOWNLOAD_CAPITAL_DATA)
+            item=JobItem(id=JS_EXECUTE_JOB_ID.JOB_DOWNLOAD_CAPITAL_DATA, varName=varName)
+            self.NeedFinanceData.append(item)
 
+        # 换手率
         if varName == 'EXCHANGE' :
-            if JS_EXECUTE_JOB_ID.JOB_DOWNLOAD_EXCHANGE_DATA not in self.IsNeedFinanceData :
-                self.IsNeedFinanceData.add(JS_EXECUTE_JOB_ID.JOB_DOWNLOAD_EXCHANGE_DATA)
+            item=JobItem(id=JS_EXECUTE_JOB_ID.JOB_DOWNLOAD_EXCHANGE_DATA, varName=varName)
+            self.NeedFinanceData.append(item)
 
 
     def VerifySymbolFunction(self, callee,args) :
@@ -256,8 +259,8 @@ class Node:
         # 财务函数
         if callee.Name=='FINANCE' :
             jobID=JS_EXECUTE_JOB_ID.GetFinnanceJobID(args[0].Value)
-            if jobID not in self.IsNeedFinanceData :
-                self.IsNeedFinanceData.add(jobID)
+            item=JobItem(id=jobID, funcName=callee.Name, args=args)
+            self.NeedFinanceData.append(item)
             return
 
         if callee.Name == 'MARGIN' :
@@ -272,9 +275,11 @@ class Node:
                 self.IsNeedNewsAnalysisData.add(jobID)
             return
 
-        if callee.Name == 'COST' or callee.Name == 'WINNER' :   # 筹码都需要换手率
-            if JS_EXECUTE_JOB_ID.JOB_DOWNLOAD_EXCHANGE_DATA not in self.IsNeedFinanceData :
-                self.IsNeedFinanceData.add(JS_EXECUTE_JOB_ID.JOB_DOWNLOAD_EXCHANGE_DATA)
+        if callee.Name in ( 'COST', 'WINNER', 'PPART', 'COSTEX', 'LWINNER', 'PWINNER'  ) :   # 筹码需要流通股
+            argItem=Variant()
+            argItem.Value=7
+            item=JobItem(id=JS_EXECUTE_JOB_ID.JOB_DOWNLOAD_FLOW_EQUITY_DATA, funcName=callee.Name, args=[argItem])
+            self.NeedFinanceData.append(item)
             return
 
         if callee.Name == 'BETA' :  # beta需要下载上证指数

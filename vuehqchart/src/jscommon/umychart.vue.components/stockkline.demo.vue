@@ -160,7 +160,10 @@ DefaultData.GetKLineOption=function()
             MaxReqeustDataCount: 1000, //日线数据最近1000天
             MaxRequestMinuteDayCount: 15,    //分钟数据最近15天
             PageSize: 50, //一屏显示多少数据 
-            IsShowTooltip: true //是否显示K线提示信息
+            IsShowTooltip: true, //是否显示K线提示信息
+            RightSpaceCount:2,  //右边预留2个K线宽度空白
+            ZoomType:1,         //PC页面版 缩放以十字光标为中心两边缩放
+            DataWidth:10,
         },
 
         KLineTitle: //标题设置
@@ -651,7 +654,7 @@ export default
             var divKline=this.$refs.kline;
             divKline.style.width=chartWidth+'px';
             divKline.style.height=chartHeight+'px';
-            if (this.KLine.JSChart) this.KLine.JSChart.OnSize();
+            if (this.KLine.JSChart) this.KLine.JSChart.OnSize({Type:1});
 
             if (this.KLine.JSChart)
             {
@@ -810,7 +813,9 @@ export default
                 for(var i=0;i<2 && i<aryIndex.length;++i)
                 {
                     var item=aryIndex[i];
-                    var index=this.KLine.IndexBar.Menu.indexOf(item.ID);
+                    var index=-1;
+                    if (item.ID) index=this.KLine.IndexBar.Menu.indexOf(item.ID);
+                    else if (item.Name) index=this.KLine.IndexBar.Menu.indexOf(item.Name);
                     if (index>=0) this.KLine.IndexBar.Selected.push(index);
                 }
             }
